@@ -463,6 +463,7 @@ public class PlaneController : MonoBehaviour
         _throttle = Utilities.MoveTo(_throttle, target, _throttleSpeed * Mathf.Abs(_throttleInput), dt);
         
 
+        _airbrakeDeployed = _throttle == 0 && _throttleInput == -1;     // Aibrake deploy for 0 throttle
         if (_airbrakeDeployed)                                          // LandingGear PM_change lift/down
         {
             foreach (var lg in _landingGear)
@@ -500,10 +501,10 @@ public class PlaneController : MonoBehaviour
         _rigidbody.AddForce(drag, ForceMode.Force);
         
         
-        if (airbrakeDrag != 0 && Vector3.Project(globalVelocity, transform.forward).magnitude > 30)
+        if (!IsGrounded && airbrakeDrag != 0 && Vector3.Project(globalVelocity, transform.forward).magnitude > 30)
         {
             var x = -transform.forward * (Vector3.Project(globalVelocity,
-                transform.forward).magnitude)/(0.025f*airbrakeDrag);
+                transform.forward).magnitude)/(0.05f*airbrakeDrag);
             Debug.DrawLine(transform.position, transform.position + Vector3.Project(globalVelocity, transform.forward)*10, Color.blue);
             Debug.DrawLine(transform.position, transform.position + x*10, Color.yellow);
             _rigidbody.AddForce(x, ForceMode.Acceleration);
