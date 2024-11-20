@@ -62,6 +62,15 @@ public partial class @PlayerInputAsset: IInputActionCollection2, IDisposable
                     ""processors"": """",
                     ""interactions"": """",
                     ""initialStateCheck"": true
+                },
+                {
+                    ""name"": ""GearsToggle"",
+                    ""type"": ""Button"",
+                    ""id"": ""9a2c7373-da82-4d60-8282-b9d333c666da"",
+                    ""expectedControlType"": ""Button"",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
                 }
             ],
             ""bindings"": [
@@ -196,6 +205,17 @@ public partial class @PlayerInputAsset: IInputActionCollection2, IDisposable
                     ""action"": ""Yaw"",
                     ""isComposite"": false,
                     ""isPartOfComposite"": true
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""da77586f-0911-4ba3-93ae-84d95d2623af"",
+                    ""path"": ""<Keyboard>/g"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""GearsToggle"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
                 }
             ]
         }
@@ -208,6 +228,7 @@ public partial class @PlayerInputAsset: IInputActionCollection2, IDisposable
         m_PlayerInput_FlapsToggle = m_PlayerInput.FindAction("FlapsToggle", throwIfNotFound: true);
         m_PlayerInput_RollPitch = m_PlayerInput.FindAction("RollPitch", throwIfNotFound: true);
         m_PlayerInput_Yaw = m_PlayerInput.FindAction("Yaw", throwIfNotFound: true);
+        m_PlayerInput_GearsToggle = m_PlayerInput.FindAction("GearsToggle", throwIfNotFound: true);
     }
 
     public void Dispose()
@@ -273,6 +294,7 @@ public partial class @PlayerInputAsset: IInputActionCollection2, IDisposable
     private readonly InputAction m_PlayerInput_FlapsToggle;
     private readonly InputAction m_PlayerInput_RollPitch;
     private readonly InputAction m_PlayerInput_Yaw;
+    private readonly InputAction m_PlayerInput_GearsToggle;
     public struct PlayerInputActions
     {
         private @PlayerInputAsset m_Wrapper;
@@ -281,6 +303,7 @@ public partial class @PlayerInputAsset: IInputActionCollection2, IDisposable
         public InputAction @FlapsToggle => m_Wrapper.m_PlayerInput_FlapsToggle;
         public InputAction @RollPitch => m_Wrapper.m_PlayerInput_RollPitch;
         public InputAction @Yaw => m_Wrapper.m_PlayerInput_Yaw;
+        public InputAction @GearsToggle => m_Wrapper.m_PlayerInput_GearsToggle;
         public InputActionMap Get() { return m_Wrapper.m_PlayerInput; }
         public void Enable() { Get().Enable(); }
         public void Disable() { Get().Disable(); }
@@ -302,6 +325,9 @@ public partial class @PlayerInputAsset: IInputActionCollection2, IDisposable
             @Yaw.started += instance.OnYaw;
             @Yaw.performed += instance.OnYaw;
             @Yaw.canceled += instance.OnYaw;
+            @GearsToggle.started += instance.OnGearsToggle;
+            @GearsToggle.performed += instance.OnGearsToggle;
+            @GearsToggle.canceled += instance.OnGearsToggle;
         }
 
         private void UnregisterCallbacks(IPlayerInputActions instance)
@@ -318,6 +344,9 @@ public partial class @PlayerInputAsset: IInputActionCollection2, IDisposable
             @Yaw.started -= instance.OnYaw;
             @Yaw.performed -= instance.OnYaw;
             @Yaw.canceled -= instance.OnYaw;
+            @GearsToggle.started -= instance.OnGearsToggle;
+            @GearsToggle.performed -= instance.OnGearsToggle;
+            @GearsToggle.canceled -= instance.OnGearsToggle;
         }
 
         public void RemoveCallbacks(IPlayerInputActions instance)
@@ -341,5 +370,6 @@ public partial class @PlayerInputAsset: IInputActionCollection2, IDisposable
         void OnFlapsToggle(InputAction.CallbackContext context);
         void OnRollPitch(InputAction.CallbackContext context);
         void OnYaw(InputAction.CallbackContext context);
+        void OnGearsToggle(InputAction.CallbackContext context);
     }
 }

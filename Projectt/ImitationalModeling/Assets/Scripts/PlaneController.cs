@@ -1,11 +1,26 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
 public class PlaneController : MonoBehaviour
 {
-    public bool AirBrakeDeployed => _airbrakeDeployed;
+    [Header("Inner calculative params")] 
+    private Quaternion _invRotation;
+    [SerializeField] private float _baseMass = 14300;
+    
+    [SerializeField] private bool _engineOff = false;
+    public bool IsGrounded = true;
 
+    public bool EngineOff
+    {
+        get { return _engineOff; }
+        private set { _engineOff = value; }
+    }
+
+    public bool AirBrakeDeployed => _airbrakeDeployed;
+        
     [SerializeField] private Rigidbody _rigidbody;
 
     [Header("VelocityParams")]
@@ -40,13 +55,13 @@ public class PlaneController : MonoBehaviour
 
     [Header("Flaps")]
     [SerializeField] private float _flapsLiftPower;
-    [SerializeField] private float _flapsAngleOfAttackBias;         //��������� ���� ����� ��� ����������� ���������
+    [SerializeField] private float _flapsAngleOfAttackBias;         //изменение угла атаки при развернутых закрылках
     [SerializeField] float _flapsDrag;
     [SerializeField] private float _flapsRetractSpeed;          // Max flaps deploy speed
     [SerializeField] private bool _flapsDeployed;
 
     [Header("Rudder")]
-    [SerializeField] private float _rudderPower;                            // Yaw lift from rudder // �������� ������������ ����, ������� ������� ��������� ���� �� ��� �������� (yaw).
+    [SerializeField] private float _rudderPower;                            // Yaw lift from rudder // мощность управляющего руля, который создает подъемную силу по оси рысканья (yaw).
     [SerializeField] private AnimationCurve _angleOfAttackRudderCurve;
     [SerializeField] private AnimationCurve _rudderInducedDragCurve;
 
@@ -57,7 +72,18 @@ public class PlaneController : MonoBehaviour
     [SerializeField] AnimationCurve _dragRight;
     [SerializeField] AnimationCurve _dragTop;
     [SerializeField] AnimationCurve _dragBottom;
+    
+    [Header("Angular Drag")]
+    [SerializeField] private Vector3 _angularDrag = new Vector3(1f, 1f, 1f);
+    
+    [Header("Stall")]
+    [SerializeField] private float _stallAngle = 17f;
+    [SerializeField] private float _stallRecoveryForce = 10f;
+    //[SerializeField] private float _stallTorqueMultiplier = 1f;//момент силы, возникающий на винте
+                                                               //или роторе при потере подъемной силы и изменении угла атаки
 
+    private bool _isStalled = false;
+    
     [Header("Steering")]
     [SerializeField] private Vector3 _turnSpeed;
     [SerializeField] private Vector3 _turnAcceleration;
@@ -65,6 +91,15 @@ public class PlaneController : MonoBehaviour
     [SerializeField] private AnimationCurve _steeringCurve;
     [SerializeField] private Vector3 _currentControlInput;
 
+    [Header("Glide")]
+    [SerializeField] private float _glideRotationSpeed = 30f;
+    [SerializeField] private float _glideDamping = 0.5f;
+    /* это способность самолета илилетательного аппарата сохранять
+      стабильность и контролируемость во время планирующего полета.
+       Данный термин обычно относят к характеристикам, которые определяют,
+        как быстро и эффективно самолет может реагировать на изменения угла
+         атаки или отклонения от заданного курса при планировании.*/
+    
     [Header("Air Density And Temperature")]
     private const float _seaLevelTemperature = 288.15f;         // Standart 15C on sea level
     private const float _temperatureLapseRate = -0.0065f;       // 6.5 per 1 km
@@ -77,9 +112,14 @@ public class PlaneController : MonoBehaviour
     [SerializeField] private PhysicMaterial _landingGearBrakesMaterial;
     [SerializeField] private PhysicMaterial _landingGearDefaultMaterial;
     [SerializeField] private List<Collider> _landingGear;
+    
+    [Header("Fuel")]
+    [SerializeField] private float _fuelCapacity = 6100f;
+    [SerializeField] private float _fuelConsumptionRate = 0.5f;
+    [SerializeField] private float _fuelDensity = 0.8f;
 
-    [Header("Inner calculative params")] 
-    private Quaternion _invRotation;
+    [SerializeField] private float _fuelAmount;
+    
 
     public Vector3 EffectiveInput { get; private set; }
 
@@ -87,8 +127,18 @@ public class PlaneController : MonoBehaviour
     [SerializeField] private List<GameObject> _graphicsObjects;
     private bool _isDestroyed = false;
 
+    [Header("Turbulence")]
+    [SerializeField] private float _turbulenceStrength = 0.05f;
+    [SerializeField] private float _turbulenceFrequency = 1f;
+    
+    private void Start()
+    {
+        _fuelAmount = _fuelCapacity;
+        UpdateMass();
 
-
+        _lastVelocity = _rigidbody.velocity;
+    }
+    
     public void PlaneCollisionCheck(Collision collision)
     {
         for (var i = 0; i < collision.contactCount; i++)
@@ -136,19 +186,35 @@ public class PlaneController : MonoBehaviour
 
     private void UpadateParametrs(float deltaTime)
     {
+        if (!IsGrounded)
+        {
+            UpdateTurbulence();
+        }
 
         UpdateFlaps();
 
-        UpdateLift();
-        UpdateThrust();
-        UpdateThrottle(deltaTime);
-        UpdateSteering(deltaTime);
+        if (!_engineOff)
+        {
+            UpdateThrust();
+            UpdateThrottle(deltaTime);
+        }
+        else {
+            UpdateGlide();
+        }
 
+        UpdateLift();
         UpdateDrag();
+        UpdateAngularDrag();
+        
+        UpdateSteering(deltaTime);
+        
+        UpdateRecoveryStall();
+        UpdateFuel(deltaTime);
     }
 
 
     #region Calculation
+    
     private Vector3 CalculateGForceLimit(Vector3 input)
     {
         return Utilities.Scale6(input,
@@ -173,6 +239,7 @@ public class PlaneController : MonoBehaviour
     
     private void CalculateAOA()                                   //  AOA calculation
     {
+        
         if (_currentLocalVelocity.sqrMagnitude <= 0.1f)                     // Low velocity implimentation
         {
             _angleOfAttack = 0;
@@ -180,7 +247,7 @@ public class PlaneController : MonoBehaviour
         
             return;
         }
-
+        _isStalled = Mathf.Abs(_angleOfAttack) > _stallAngle;
         _angleOfAttack = Mathf.Atan2(-_currentLocalVelocity.y, _currentLocalVelocity.z);
         _angleOfAttackYaw = Mathf.Atan2(_currentLocalVelocity.x, _currentLocalVelocity.z);      // Yaw Aoa
 
@@ -238,7 +305,7 @@ public class PlaneController : MonoBehaviour
     private float CalculateAirDensity(float altitude)
     {
         var temperature = _seaLevelTemperature + _temperatureLapseRate * altitude;
-        var pressure = 101325 * Mathf.Pow(1 + (_temperatureLapseRate * altitude) / _seaLevelTemperature, -9.80665f / (_temperatureLapseRate * 287.05f));        // ��������� �������� �� ������ ���� � 101325 ��.
+        var pressure = 101325 * Mathf.Pow(1 + (_temperatureLapseRate * altitude) / _seaLevelTemperature, -9.80665f / (_temperatureLapseRate * 287.05f));        // Начальное давление на уровне моря — 101325 Па.
         var density = pressure / (287.05f * temperature);
 
         return Mathf.Max(density, 0.1f);
@@ -247,17 +314,109 @@ public class PlaneController : MonoBehaviour
     #endregion
 
     #region Update
+    private void UpdateAngularDrag()
+    {
+        var av = _currentLocalAngularVelocity;
+    
+        if (av.sqrMagnitude == 0)
+        {
+            return;
+        }
 
+        var drag = Vector3.Scale(av.sqrMagnitude * -av.normalized, _angularDrag);
+        Debug.Log("AngularDrag: "+ drag.ToString());
+        _rigidbody.AddRelativeTorque(drag, ForceMode.Acceleration);
+    }
+    
+    private void UpdateGlide()
+    {
+        if (!_engineOff)
+        {
+            return;
+        }
+        
+        Debug.Log("Gliding");
+        if (_rigidbody.velocity.sqrMagnitude < 0.1f)
+        {
+            return;
+        }
+
+        var forward = _rigidbody.velocity.normalized;
+        var up = Vector3.up;
+        
+    //Creates a rotation with the specified forward and upwards directions.
+        var targetRotation = Quaternion.LookRotation(forward, up);
+
+        Debug.Log(targetRotation);
+        /*
+        current	The vector being managed.
+        target	The vector.
+*/
+        _rigidbody.rotation = Quaternion.RotateTowards(_rigidbody.rotation, targetRotation, _glideRotationSpeed * Time.deltaTime);
+        Debug.Log(Quaternion.RotateTowards(_rigidbody.rotation, targetRotation, _glideRotationSpeed * Time.deltaTime));
+        _rigidbody.angularVelocity = Vector3.Lerp(_rigidbody.angularVelocity, Vector3.zero, Time.deltaTime * _glideDamping);
+    }
+    
+    private void UpdateRecoveryStall()
+    {
+        if (!_isStalled)
+        {
+            return;
+        }
+        
+        var stabilizationTorque = new Vector3(-_currentLocalAngularVelocity.x, 
+            -_currentLocalAngularVelocity.y, -_currentLocalAngularVelocity.z);
+        _rigidbody.AddRelativeTorque(stabilizationTorque * _stallRecoveryForce, ForceMode.Acceleration);    
+        
+    }
+    
+    private void UpdateTurbulence()
+    {
+        var turbulence = new Vector3(
+            Random.Range(-_turbulenceStrength, _turbulenceStrength),
+            Random.Range(-_turbulenceStrength, _turbulenceStrength),
+            Random.Range(-_turbulenceStrength, _turbulenceStrength)
+        );
+
+        _rigidbody.AddRelativeTorque(turbulence, ForceMode.Acceleration);
+        Debug.DrawLine(transform.position, transform.position+turbulence*100f, Color.cyan);
+        Debug.Log("Turbulence:"+turbulence);
+    }
+
+    private void UpdateMass()
+    {
+        var fuelMass = _fuelAmount * _fuelDensity;
+        _rigidbody.mass = _baseMass + fuelMass;
+    }
+    private void UpdateFuel(float deltaTime)
+    {
+        if (_fuelAmount <= 0 && !_engineOff)
+        {
+            _engineOff = true;
+            _throttle = 0;
+            _fuelAmount = 0;
+    
+            Debug.Log("Топливо закончилось, двигатель выключен.");
+        }
+        else if (_throttle > 0 && !_engineOff)
+        {
+            var fuelConsumed = _throttle * _fuelConsumptionRate * deltaTime;
+            _fuelAmount = _fuelAmount - fuelConsumed;
+            UpdateMass();
+        }
+
+        
+    }
     private void UpdateSteering(float dt)
     {
         var speed = Mathf.Max(0, _currentLocalVelocity.z);
         var steeringPower = _steeringCurve.Evaluate(speed);
 
         var airDensity = CalculateAirDensity(_rigidbody.position.y);
-        // ������ ��������������� ���� ���������� � ������ ����������
+        // Расчет масштабирования силы управления с учетом перегрузок
         var gForceScaling = CalculateGLimiter(_currentControlInput, _turnSpeed * Mathf.Deg2Rad * steeringPower * airDensity);
 
-        // ������� ������� �������� � ������ ����������� �� �����������
+        // Целевая угловая скорость с учетом ограничений по перегрузкам
         var targetAV = Vector3.Scale(_currentControlInput, _turnSpeed * steeringPower * gForceScaling);
         var av = _currentLocalAngularVelocity * Mathf.Rad2Deg;
 
@@ -276,7 +435,7 @@ public class PlaneController : MonoBehaviour
            );
         var effectiveInput = (correctionInput + _currentControlInput) * gForceScaling;
 
-        //��������� ������ ��������
+        //Получение нового свойства
         EffectiveInput = new Vector3(
             Mathf.Clamp(effectiveInput.x, -1, 1),
             Mathf.Clamp(effectiveInput.y, -1, 1),
@@ -302,10 +461,7 @@ public class PlaneController : MonoBehaviour
         }
 
         _throttle = Utilities.MoveTo(_throttle, target, _throttleSpeed * Mathf.Abs(_throttleInput), dt);
-
-
-        // Airbrakes
-        _airbrakeDeployed = _throttle == 0 && _throttleInput == -1;     // Aibrake deploy for 0 throttle
+        
 
         if (_airbrakeDeployed)                                          // LandingGear PM_change lift/down
         {
@@ -330,21 +486,29 @@ public class PlaneController : MonoBehaviour
 
         var airbrakeDrag = _airbrakeDeployed ? _airbrakeDrag : 0f;
         var flapsDrag = _flapsDeployed ? _flapsDrag : 0f;
-
         var dragCoefficientToDirections = Utilities.Scale6(
             globalVelocity.normalized,
             _dragRight.Evaluate(Mathf.Abs(globalVelocity.x)),
             _dragLeft.Evaluate(Mathf.Abs(globalVelocity.x)),
             _dragTop.Evaluate(Mathf.Abs(globalVelocity.y)),
             _dragBottom.Evaluate(Mathf.Abs(globalVelocity.y)),
-            _dragForward.Evaluate(Mathf.Abs(globalVelocity.z) + airbrakeDrag + flapsDrag),      // Counter force for forward movement    
+            _dragForward.Evaluate(Mathf.Abs(globalVelocity.z) + airbrakeDrag + flapsDrag), // Counter force for forward movement
             _dragBack.Evaluate(Mathf.Abs(globalVelocity.z))
         );
 
         var drag = dragCoefficientToDirections.magnitude * globalVelocitySqr * -globalVelocity.normalized;
-
         _rigidbody.AddForce(drag, ForceMode.Force);
-
+        
+        
+        if (airbrakeDrag != 0 && Vector3.Project(globalVelocity, transform.forward).magnitude > 30)
+        {
+            var x = -transform.forward * (Vector3.Project(globalVelocity,
+                transform.forward).magnitude)/(0.025f*airbrakeDrag);
+            Debug.DrawLine(transform.position, transform.position + Vector3.Project(globalVelocity, transform.forward)*10, Color.blue);
+            Debug.DrawLine(transform.position, transform.position + x*10, Color.yellow);
+            _rigidbody.AddForce(x, ForceMode.Acceleration);
+            Debug.Log("AirbrakesDrag"+x);
+        }
     }
     private void UpdateLift()
     {
@@ -384,9 +548,21 @@ public class PlaneController : MonoBehaviour
     #endregion
 
     #region Input Handle
+
+    public void GearToggleHandler()
+    {
+        foreach (var lg in _landingGear)
+        {
+            lg.enabled = !lg.enabled;
+        }
+    }
+
     public void SetThrottleInput(float input)
     {
         _throttleInput = input;
+        
+        // Airbrakes
+        _airbrakeDeployed = _throttle == 0 && _throttleInput == -1;     // Aibrake deploy for 0 throttle
     }
 
     public void SetControlInput(Vector3 input)
@@ -401,11 +577,6 @@ public class PlaneController : MonoBehaviour
         private set
         {
             _flapsDeployed = value;
-
-            foreach (var lg in _landingGear)
-            {
-                lg.enabled = value;
-            }
         }
     }
 
@@ -422,9 +593,10 @@ public class PlaneController : MonoBehaviour
     #region Debug
     private void Logs() 
     {
-        Debug.Log($"LocVelocity: {_currentLocalVelocity}, AoA: {_angleOfAttack * Mathf.Rad2Deg}");
-        Debug.Log($"Lift: {_liftPower}");
+        Debug.Log($"Velocity: {_currentLocalVelocity}, AoA: {_angleOfAttack}°, " +
+                  $"IsStalled: {_isStalled}");Debug.Log($"Lift: {_liftPower}");
         Debug.Log($"Throttle: {_throttle}");
+        Debug.Log($"AngularVelocity: {_currentLocalAngularVelocity}");
     }
     #endregion
 

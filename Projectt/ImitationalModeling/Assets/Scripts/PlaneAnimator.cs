@@ -10,7 +10,7 @@ public class PlaneAnimator : MonoBehaviour
     [SerializeField] private List<GameObject> _afterburnerGraphics;
     [SerializeField] private List<Transform> _afterburnersTransforms;
 
-    [SerializeField] private float _afterBurnerTreshold;        // Порог? Предел?
+    [SerializeField] private float _afterBurnerTreshold;        // пїЅпїЅпїЅпїЅпїЅ? пїЅпїЅпїЅпїЅпїЅпїЅ?
     [SerializeField] private float _afterburnerMinSize;
     [SerializeField] private float _afterburnerMaxSize;
 
@@ -144,7 +144,7 @@ public class PlaneAnimator : MonoBehaviour
 
         var size = Mathf.Lerp(_afterburnerMinSize, _afterburnerMaxSize, afterburnerT);
 
-        if (throttle >= _afterBurnerTreshold)
+        if (throttle >= _afterBurnerTreshold && !_planeController.EngineOff)
         {
             for (var i = 0; i < _afterburnerGraphics.Count; i++)
             {

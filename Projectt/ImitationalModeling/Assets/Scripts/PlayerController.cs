@@ -60,6 +60,11 @@ public class PlayerController : MonoBehaviour, PlayerInputAsset.IPlayerInputActi
         }
     }
 
+    public void OnGearsToggle(InputAction.CallbackContext context)
+    {
+        _planeController.GearToggleHandler();
+    }
+
     public void OnRollPitch(InputAction.CallbackContext context)
     {
         if (_planeController == null)
